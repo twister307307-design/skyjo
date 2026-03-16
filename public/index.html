@@ -84,11 +84,11 @@
       <div class="rules-grid">
         <div class="rule-chip">🎴 12 cartes par joueur en grille 3×4</div>
         <div class="rule-chip">👁️ Retournez 2 cartes au départ</div>
-        <div class="rule-chip">📥 Piochez ou prenez la défausse</div>
-        <div class="rule-chip">🔄 Remplacez ou défaussez + retournez</div>
-        <div class="rule-chip">✨ 3 identiques en colonne = eliminées !</div>
-        <div class="rule-chip">🔔 Retournez tout = dernier tour !</div>
-        <div class="rule-chip">🏆 Score le plus bas gagne</div>
+        <div class="rule-chip">📥 Pioche ou prends la défausse</div>
+        <div class="rule-chip">🔄 Remplace n'importe quelle carte</div>
+        <div class="rule-chip">🗑️ Jette la carte → retourne une cachée</div>
+        <div class="rule-chip">✨ 3 identiques en colonne = éliminées !</div>
+        <div class="rule-chip">🔔 Tout retourné = dernier tour !</div>
         <div class="rule-chip">💥 Fermer sans le plus bas = score x2 !</div>
       </div>
     </div>
@@ -103,64 +103,86 @@
   </div>
 </div>
 
-<!-- JEU -->
+<!-- JEU - SCROLLABLE sur mobile -->
 <div id="s-game" class="screen">
-  <div class="game-wrap">
-
-    <!-- TOP BAR -->
-    <div class="game-top-bar">
-      <div class="top-info">
-        <span id="g-phase-label" class="phase-label">En jeu</span>
-        <span id="g-round" style="font-size:.72rem;color:var(--muted)">Manche 1</span>
-      </div>
-      <div id="g-alert" class="game-alert hidden"></div>
-      <div style="display:flex;gap:.4rem;align-items:center">
-        <button class="music-btn" onclick="toggleMusic()" id="music-btn">🔊</button>
-        <button class="btn-ghost sm" onclick="leaveRoom()">✕</button>
-      </div>
+  <!-- BARRE FIXE EN HAUT -->
+  <div class="game-topbar">
+    <div class="top-left">
+      <span id="g-phase-label" class="phase-label">En jeu</span>
+      <span id="g-round" class="round-label">Manche 1</span>
     </div>
+    <div id="g-alert" class="game-alert hidden"></div>
+    <div style="display:flex;gap:.35rem;align-items:center">
+      <button class="music-btn" onclick="toggleMusic()" id="music-btn">🔊</button>
+      <button class="btn-ghost sm" onclick="leaveRoom()">✕</button>
+    </div>
+  </div>
+
+  <!-- CONTENU SCROLLABLE -->
+  <div class="game-scroll">
 
     <!-- SCORES -->
     <div class="scores-bar" id="scores-bar"></div>
 
-    <!-- AUTRES JOUEURS GRILLES -->
-    <div class="other-grids" id="other-grids"></div>
+    <!-- TURN BAR -->
+    <div class="turn-bar" id="turn-bar">En attente...</div>
 
-    <!-- ZONE CENTRALE -->
+    <!-- ZONE PIOCHE / DEFAUSSE + CARTE EN MAIN -->
     <div class="play-zone">
-      <div class="pile-wrap">
+      <!-- Pioche -->
+      <div class="pile-block">
         <div class="pile deck-pile" id="deck-pile" onclick="drawDeck()">
           <div class="pile-inner">🌟</div>
-          <div class="pile-label" id="deck-count">-- cartes</div>
         </div>
-        <div style="font-size:1.2rem;color:var(--muted);font-weight:800">↔</div>
-        <div class="pile-wrap-inner">
-          <div class="pile discard-pile" id="discard-pile" onclick="takeDiscard()">
-            <div class="pile-inner" id="discard-val">--</div>
-          </div>
-          <div class="pile-label">Défausse</div>
-        </div>
+        <div class="pile-label" id="deck-count">-- cartes</div>
+        <div class="pile-hint">Piocher</div>
       </div>
-      <!-- Drawn card -->
-      <div id="drawn-wrap" class="drawn-wrap hidden">
-        <div class="drawn-label">Carte en main :</div>
-        <div class="drawn-card" id="drawn-card"></div>
-        <div class="drawn-actions">
-          <button class="act-btn" onclick="discardDrawn()">🗑️ Défausser</button>
+
+      <!-- Flèche -->
+      <div class="pile-arrow">↔</div>
+
+      <!-- Défausse -->
+      <div class="pile-block">
+        <div class="pile discard-pile" id="discard-pile" onclick="takeDiscard()">
+          <span id="discard-val" class="discard-val">--</span>
+        </div>
+        <div class="pile-label">Défausse</div>
+        <div class="pile-hint">Prendre</div>
+      </div>
+
+      <!-- Carte en main (après pioche) -->
+      <div id="drawn-section" class="drawn-section hidden">
+        <div class="drawn-block">
+          <div class="drawn-card" id="drawn-card-display"></div>
+          <div class="drawn-card-val" id="drawn-card-val"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:.4rem">
+          <div class="drawn-hint">Que faire avec cette carte ?</div>
+          <div class="drawn-actions-row">
+            <button class="btn-discard" onclick="setDiscardMode()">🗑️ Jeter + retourner</button>
+            <button class="btn-keep" onclick="setReplaceMode()">✅ Remplacer</button>
+          </div>
+          <div class="drawn-hint" id="drawn-action-hint"></div>
         </div>
       </div>
     </div>
 
-    <!-- TOUR INDICATOR -->
-    <div class="turn-bar" id="turn-bar">En attente...</div>
+    <!-- INSTRUCTION ACTION -->
+    <div id="action-instruction" class="action-instruction hidden"></div>
+
+    <!-- ADVERSAIRES -->
+    <div class="other-grids" id="other-grids"></div>
 
     <!-- MA GRILLE -->
     <div class="my-grid-section">
-      <div class="my-grid-label">🎴 Ta grille — Score : <span id="my-score">0</span></div>
+      <div class="my-grid-label">
+        🎴 Ta grille
+        <span class="my-score-badge">Score : <strong id="my-score">0</strong></span>
+      </div>
       <div class="my-grid" id="my-grid"></div>
     </div>
 
-    <!-- CHAT/LOG -->
+    <!-- CHAT / LOG -->
     <div class="bottom-toggle">
       <button class="toggle-btn active" id="btn-chat" onclick="showTab('chat')">💬 Chat</button>
       <button class="toggle-btn" id="btn-log" onclick="showTab('log')">📜 Journal</button>
@@ -177,10 +199,11 @@
         <div id="log-list"></div>
       </div>
     </div>
-  </div>
+
+  </div><!-- end game-scroll -->
 </div>
 
-<!-- END ROUND OVERLAY -->
+<!-- END ROUND -->
 <div id="end-overlay" class="end-overlay hidden">
   <div class="end-card">
     <div class="end-ico" id="end-ico">📊</div>
