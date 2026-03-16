@@ -31,16 +31,15 @@ document.addEventListener('keydown', startMusicOnce);
 const ALL_AVATARS = ['🌟','🎯','🎲','🃏','🎴','🎪','🎨','🎭','🦊','🐺','🐉','🦋','🌙','⭐','🔥','💎','👑','🤖','👾','🎃','🧙','🦝','🐻','🦅','🎵','🌈','⚡','🍀','🔮','💫'];
 
 function cardColor(v) {
-  if (v === null) return 'face-down';
+  if (v === null || v === undefined) return 'face-down';
   if (v === -2) return 'dark-blue';
   if (v === 0) return 'blue';
   if (v <= 4) return 'green';
   if (v <= 8) return 'yellow';
   return 'red';
 }
-
 function cardDisplay(v) {
-  if (v === null) return '🌟';
+  if (v === null || v === undefined) return '🌟';
   if (v === -2) return '-2';
   return String(v);
 }
@@ -52,7 +51,12 @@ let myAvatar = localStorage.getItem('sky_avatar') || '🌟';
 let currentRoom = null, gs = null;
 let socket = null;
 let selectedAv = '🌟', endShown = false;
-let actionMode = null; // 'place' | 'flip' | 'reveal2'
+
+// Mode d'action actuel :
+// null = rien
+// 'replace' = cliquer une carte pour la remplacer par drawnCard
+// 'flip'    = cliquer une carte face cachée pour la retourner (après avoir jeté)
+let gridActionMode = null;
 
 // ─── INIT ─────────────────────────────────────────────────────
 function init() {
@@ -155,12 +159,14 @@ function getMySid(players) {
 function onState(st) {
   gs = st;
   const sid = getMySid(st.players);
+
+  // Reset action mode quand c'est plus mon tour ou phase change
+  const isMyTurn = st.currentPlayer === sid;
+  if (!isMyTurn || st.phase === 'lobby') gridActionMode = null;
+
   if (st.phase === 'lobby') { show('s-room'); renderRoom(st, sid); return; }
   show('s-game'); playMusic('game'); renderGame(st, sid);
-  if (st.phase === 'finished' && !endShown) {
-    endShown = true;
-    showEndScreen(st, sid);
-  }
+  if (st.phase === 'finished' && !endShown) { endShown = true; showEndScreen(st, sid); }
   if (st.phase !== 'finished') endShown = false;
 }
 
@@ -190,58 +196,32 @@ function renderGame(st, sid) {
   const phaseLabels = { reveal2:'👁️ Retournez 2 cartes', playing:'🎮 En jeu', last_round:'🔔 Dernier tour !', finished:'📊 Fin de manche' };
   document.getElementById('g-phase-label').textContent = phaseLabels[phase] || phase;
   document.getElementById('g-round').textContent = `Manche ${roundNum}`;
-
   const alert = document.getElementById('g-alert');
-  if (phase === 'last_round') { alert.classList.remove('hidden'); alert.textContent = '🔔 Dernier tour ! Retournez vos cartes !'; }
+  if (phase === 'last_round') { alert.classList.remove('hidden'); alert.textContent = '🔔 Dernier tour !'; }
   else alert.classList.add('hidden');
 
-  // Scores bar
+  // Scores
   const sb = document.getElementById('scores-bar');
   const sorted = playerOrder.map(s => players[s]).filter(Boolean).sort((a,b) => a.totalScore - b.totalScore);
-  sb.innerHTML = sorted.map(p => {
-    const isLeader = p.totalScore === sorted[0].totalScore;
-    return `<div class="score-chip ${isLeader?'leader':''}">
-      <span class="sc-av">${p.avatar||'🌟'}</span>
-      <span>${p.username}</span>
-      <strong>${p.totalScore}pts</strong>
-      <span style="opacity:.5;font-size:.62rem">(+${p.score})</span>
-    </div>`;
-  }).join('');
-
-  // Deck & discard
-  document.getElementById('deck-count').textContent = `${deckCount} cartes`;
-  const dp = document.getElementById('discard-pile');
-  const dv = document.getElementById('discard-val');
-  if (topDiscard !== null && topDiscard !== undefined) {
-    dp.className = `pile discard-pile sky-card ${cardColor(topDiscard)}`;
-    dv.textContent = cardDisplay(topDiscard);
-  } else {
-    dp.className = 'pile discard-pile'; dv.textContent = '--';
-  }
-  // Highlight discard if can take
-  dp.style.cursor = (isMyTurn && turnPhase === 'draw') ? 'pointer' : 'default';
-  if (isMyTurn && turnPhase === 'draw') dp.style.boxShadow = '0 0 14px rgba(255,215,0,.5)';
-  else dp.style.boxShadow = '';
-
-  // Drawn card
-  const dw = document.getElementById('drawn-wrap');
-  const dc = document.getElementById('drawn-card');
-  if (drawnCard !== null && drawnCard !== undefined && isMyTurn) {
-    dw.classList.remove('hidden');
-    dc.className = `drawn-card sky-card ${cardColor(drawnCard)}`;
-    dc.textContent = cardDisplay(drawnCard);
-  } else dw.classList.add('hidden');
+  sb.innerHTML = sorted.map((p,i) => `<div class="score-chip ${i===0?'leader':''}">
+    <span class="sc-av">${p.avatar||'🌟'}</span>
+    <span>${p.username}</span>
+    <strong>${p.totalScore}pts</strong>
+    <span style="opacity:.45;font-size:.6rem">(+${p.score})</span>
+  </div>`).join('');
 
   // Turn bar
   const tb = document.getElementById('turn-bar');
   if (phase === 'reveal2') {
     const myRevealed = me?.grid?.filter(c => c.revealed && !c.removed).length || 0;
-    if (myRevealed < 2) { tb.textContent = `👁️ Retournez ${2-myRevealed} carte${myRevealed===1?'':'s'} !`; tb.className = 'turn-bar my-turn'; }
+    if (myRevealed < 2) { tb.textContent = `👁️ Retournez ${2-myRevealed} carte${myRevealed===1?'':'s'} cachée(s) !`; tb.className = 'turn-bar my-turn'; }
     else { tb.textContent = '✅ En attente des autres joueurs...'; tb.className = 'turn-bar'; }
   } else if (isMyTurn) {
-    if (turnPhase === 'draw') tb.textContent = '🎯 TON TOUR — Pioche ou prends la défausse !';
-    else if (turnPhase === 'replace_or_discard') tb.textContent = '🃏 Remplace une carte ou défausse + retourne !';
-    else if (turnPhase === 'must_replace') tb.textContent = '🔄 Choisis une carte à remplacer dans ta grille !';
+    if (gridActionMode === 'replace') tb.textContent = '🔄 Clique une carte de ta grille pour la REMPLACER';
+    else if (gridActionMode === 'flip') tb.textContent = '👁️ Clique une carte CACHÉE pour la retourner';
+    else if (turnPhase === 'draw') tb.textContent = '🎯 TON TOUR — Pioche 📥 ou prends la défausse ♻️';
+    else if (turnPhase === 'must_replace') tb.textContent = '🔄 Clique une carte de ta grille pour la REMPLACER';
+    else tb.textContent = '🃏 Remplace une carte ou 🗑️ Jette + retourne';
     tb.className = 'turn-bar my-turn';
   } else {
     const cur = players[currentPlayer];
@@ -249,15 +229,76 @@ function renderGame(st, sid) {
     tb.className = 'turn-bar';
   }
 
-  // Other players grids
+  // Deck
+  document.getElementById('deck-count').textContent = `${deckCount} cartes`;
+  const deckEl = document.getElementById('deck-pile');
+  if (isMyTurn && turnPhase === 'draw') deckEl.style.boxShadow = '0 0 18px rgba(255,215,0,.6)';
+  else deckEl.style.boxShadow = '';
+
+  // Discard pile
+  const dp = document.getElementById('discard-pile');
+  const dv = document.getElementById('discard-val');
+  if (topDiscard !== null && topDiscard !== undefined) {
+    dp.className = `pile discard-pile sky-card ${cardColor(topDiscard)}`;
+    dv.textContent = cardDisplay(topDiscard);
+    dp.style.cursor = (isMyTurn && turnPhase === 'draw') ? 'pointer' : 'default';
+    if (isMyTurn && turnPhase === 'draw') dp.style.boxShadow = '0 0 18px rgba(255,215,0,.5)';
+    else dp.style.boxShadow = '';
+  } else {
+    dp.className = 'pile discard-pile'; dv.textContent = '--'; dp.style.boxShadow = '';
+  }
+
+  // Drawn card section
+  const ds = document.getElementById('drawn-section');
+  const dc = document.getElementById('drawn-card-display');
+  const dcv = document.getElementById('drawn-card-val');
+  if (drawnCard !== null && drawnCard !== undefined && isMyTurn && (turnPhase === 'replace_or_discard' || turnPhase === 'must_replace')) {
+    ds.classList.remove('hidden');
+    dc.className = `drawn-card sky-card ${cardColor(drawnCard)}`;
+    dc.textContent = cardDisplay(drawnCard);
+    dcv.textContent = drawnCard === -2 ? 'Valeur : -2' : `Valeur : ${drawnCard}`;
+    // must_replace = pris de la défausse, doit forcément remplacer
+    const btnDiscard = document.getElementById('btn-discard-drawn');
+    const btnKeep = document.querySelector('.btn-keep');
+    if (turnPhase === 'must_replace') {
+      if (btnDiscard) btnDiscard.style.display = 'none';
+      if (btnKeep) btnKeep.style.display = 'none';
+      gridActionMode = 'replace';
+      document.getElementById('drawn-action-hint').textContent = '👆 Tu as pris la défausse — clique une carte de ta grille pour la remplacer !';
+    } else {
+      if (btnDiscard) btnDiscard.style.display = 'flex';
+      if (btnKeep) btnKeep.style.display = 'flex';
+      if (!gridActionMode) document.getElementById('drawn-action-hint').textContent = '';
+    }
+  } else {
+    ds.classList.add('hidden');
+    gridActionMode = null;
+  }
+
+  // Action instruction
+  const ai = document.getElementById('action-instruction');
+  if (gridActionMode === 'replace' && isMyTurn) {
+    ai.classList.remove('hidden');
+    ai.textContent = '👆 Clique n\'importe quelle carte pour la remplacer (même cachée !)';
+  } else if (gridActionMode === 'flip' && isMyTurn) {
+    ai.classList.remove('hidden');
+    ai.textContent = '👆 Clique une carte face cachée pour la retourner !';
+  } else if (isMyTurn && turnPhase === 'must_replace') {
+    ai.classList.remove('hidden');
+    ai.textContent = '👆 Tu as pris la défausse — clique une carte pour la remplacer !';
+  } else {
+    ai.classList.add('hidden');
+  }
+
+  // Other players
   const og = document.getElementById('other-grids');
   og.innerHTML = playerOrder.filter(s => s !== sid).map(s => {
     const p = players[s]; if (!p) return '';
     return `<div class="opp-grid-wrap ${s===currentPlayer&&phase!=='reveal2'?'current-turn':''}">
       <div class="opp-name">${p.avatar||'🌟'} ${p.username}</div>
-      <div class="opp-score">Score: ${p.score}</div>
+      <div class="opp-score-txt">Score: ${p.score} (total: ${p.totalScore})</div>
       <div class="mini-grid">
-        ${p.grid.map(c => `<div class="mini-card ${c.removed?'removed':cardColor(c.value)}" style="${c.removed?'':''}">
+        ${p.grid.map(c => `<div class="mini-card ${c.removed?'':cardColor(c.value)}" style="${c.removed?'opacity:.15':''}">
           ${c.removed?'':c.value!==null?cardDisplay(c.value):'·'}
         </div>`).join('')}
       </div>
@@ -271,31 +312,32 @@ function renderGame(st, sid) {
     myGrid.innerHTML = me.grid.map((c, i) => {
       if (c.removed) return `<div class="sky-card removed"></div>`;
       const isFaceDown = !c.revealed;
-      const canClick = isMyTurn && !isFaceDown===false
-        ? (phase==='reveal2' && !c.revealed && (me.grid.filter(x=>x.revealed).length < 2))
-        : (phase!=='reveal2' && isMyTurn && (
-            (turnPhase==='replace_or_discard' && isFaceDown) ||
-            turnPhase==='must_replace' ||
-            (turnPhase==='replace_or_discard' && !isFaceDown)
-          ));
 
-      // More precise click logic
-      let clickable = false;
+      let extraClass = '';
       let clickFn = '';
-      if (phase === 'reveal2' && !c.revealed) {
-        clickable = true;
-        clickFn = `revealInitial(${i})`;
-      } else if (isMyTurn && turnPhase === 'replace_or_discard') {
-        clickable = true;
-        if (!c.revealed) clickFn = `gridClick(${i},'flip')`;
-        else clickFn = `gridClick(${i},'replace')`;
-      } else if (isMyTurn && turnPhase === 'must_replace') {
-        clickable = true;
-        clickFn = `gridClick(${i},'replace')`;
+
+      if (phase === 'reveal2' && isFaceDown) {
+        const alreadyRevealed = me.grid.filter(x => x.revealed && !x.removed).length;
+        if (alreadyRevealed < 2) {
+          extraClass = 'reveal-mode';
+          clickFn = `revealInitial(${i})`;
+        }
+      } else if (isMyTurn) {
+        if (gridActionMode === 'replace' || turnPhase === 'must_replace') {
+          // Can replace ANY card (face up or down)
+          extraClass = 'can-click';
+          clickFn = `doReplace(${i})`;
+        } else if (gridActionMode === 'flip') {
+          // Can only flip face-down cards
+          if (isFaceDown) {
+            extraClass = 'can-click reveal-mode';
+            clickFn = `doFlip(${i})`;
+          }
+        }
       }
 
-      return `<div class="sky-card ${isFaceDown?'face-down':cardColor(c.value)} ${clickable?'clickable highlight':''}"
-        onclick="${clickFn||''}">
+      return `<div class="sky-card ${isFaceDown?'face-down':cardColor(c.value)} ${extraClass}"
+        onclick="${clickFn}">
         ${isFaceDown ? '🌟' : cardDisplay(c.value)}
       </div>`;
     }).join('');
@@ -307,6 +349,72 @@ function renderGame(st, sid) {
   ll.scrollTop = ll.scrollHeight;
 }
 
+// ─── GRID ACTIONS ─────────────────────────────────────────────
+
+// Retourner une carte lors de la phase initiale
+function revealInitial(idx) {
+  socket.emit('reveal_initial', { token, code: currentRoom, cardIdx: idx });
+}
+
+// Piocher dans le deck
+function drawDeck() {
+  if (!gs) return;
+  const sid = getMySid(gs.players);
+  if (gs.currentPlayer !== sid || gs.turnPhase !== 'draw') return;
+  socket.emit('draw_deck', { token, code: currentRoom });
+  gridActionMode = 'replace'; // After drawing, can replace any card
+}
+
+// Prendre la carte de la défausse
+function takeDiscard() {
+  if (!gs) return;
+  const sid = getMySid(gs.players);
+  if (gs.currentPlayer !== sid || gs.turnPhase !== 'draw') return;
+  socket.emit('take_discard', { token, code: currentRoom });
+  gridActionMode = 'replace'; // Must replace after taking discard
+}
+
+// Bouton "Jeter" → active mode flip (retourner une carte cachée)
+function setDiscardMode() {
+  if (!gs) return;
+  const sid = getMySid(gs.players);
+  if (gs.currentPlayer !== sid) return;
+  const me = gs.players[sid];
+  const hasHidden = me?.grid?.some(c => !c.revealed && !c.removed);
+  if (!hasHidden) {
+    showNotif('❌ Impossible', 'Toutes vos cartes sont déjà retournées !', '😅');
+    return;
+  }
+  gridActionMode = 'flip';
+  document.getElementById('drawn-action-hint').textContent = '👆 Clique maintenant une carte face cachée dans ta grille !';
+  renderGame(gs, sid);
+}
+
+// Bouton "Remplacer" → active mode replace
+function setReplaceMode() {
+  if (!gs) return;
+  const sid = getMySid(gs.players);
+  if (gs.currentPlayer !== sid) return;
+  gridActionMode = 'replace';
+  document.getElementById('drawn-action-hint').textContent = '👆 Clique n\'importe quelle carte de ta grille pour la remplacer !';
+  renderGame(gs, sid);
+}
+
+// Remplacer une carte par la carte en main
+function doReplace(idx) {
+  if (!gs) return;
+  socket.emit('place_card', { token, code: currentRoom, gridIdx: idx });
+  gridActionMode = null;
+}
+
+// Jeter la carte en main + retourner une carte cachée
+function doFlip(idx) {
+  if (!gs) return;
+  socket.emit('discard_and_flip', { token, code: currentRoom, gridIdx: idx });
+  gridActionMode = null;
+}
+
+// ─── END SCREEN ───────────────────────────────────────────────
 function showEndScreen(st, sid) {
   const { players, playerOrder, scores, roundNum } = st;
   const gameOver = Object.values(scores).some(s => s >= 100);
@@ -325,35 +433,6 @@ function showEndScreen(st, sid) {
   document.getElementById('btn-next-round').style.display = isHost && !gameOver ? 'block' : 'none';
   document.getElementById('btn-new-game').style.display = isHost && gameOver ? 'block' : 'none';
   document.getElementById('end-overlay').classList.remove('hidden');
-}
-
-// ─── ACTIONS ──────────────────────────────────────────────────
-function revealInitial(idx) {
-  socket.emit('reveal_initial', { token, code: currentRoom, cardIdx: idx });
-}
-function drawDeck() {
-  if (!gs || gs.currentPlayer !== socket.id && !Object.keys(gs.players).find(k=>gs.players[k].username===myUsername&&k===gs.currentPlayer)) return;
-  if (gs.turnPhase !== 'draw') return;
-  socket.emit('draw_deck', { token, code: currentRoom });
-}
-function takeDiscard() {
-  if (!gs) return;
-  const sid = getMySid(gs.players);
-  if (gs.currentPlayer !== sid || gs.turnPhase !== 'draw') return;
-  socket.emit('take_discard', { token, code: currentRoom });
-}
-function discardDrawn() {
-  // Can only do this when in replace_or_discard mode — need to pick a face-down card to flip
-  // This button triggers a UI hint
-  showNotif('🗑️ Défausser', 'Cliquez maintenant sur une carte face cachée de votre grille pour la retourner !', '👁️');
-}
-function gridClick(idx, action) {
-  if (!gs) return;
-  if (action === 'replace') {
-    socket.emit('place_card', { token, code: currentRoom, gridIdx: idx });
-  } else if (action === 'flip') {
-    socket.emit('discard_and_flip', { token, code: currentRoom, gridIdx: idx });
-  }
 }
 
 // ─── CHAT ──────────────────────────────────────────────────────
